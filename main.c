@@ -124,16 +124,6 @@ typedef struct {
     DState_save save;
 } DState;
 
-#define BZ_GET_FAST(cccc)                     \
-    s->tPos = s->tt[s->tPos];                 \
-    cccc = (unsigned char)(s->tPos & 0xff);           \
-    s->tPos >>= 8;
-
-#define BZ_GET_FAST_C(cccc)                   \
-    c_tPos = c_tt[c_tPos];                    \
-    cccc = (unsigned char)(c_tPos & 0xff);            \
-    c_tPos >>= 8;
-
 #define BZ2_bzDecompressInit(s) { (s)->state = BZ_X_BLKHDR_1; (s)->bsLive = 0; }
 
 void print_array(const char *name, const int *array, const int size) {
@@ -305,15 +295,11 @@ void BZ2_hbCreateDecodeTables (
       base[i] = ((limit[i-1] + 1) << 1) - base[i];
 }
 
-#define RETURN(rrr)                               \
-   { retVal = rrr; goto save_state_and_return; };
-
-static int __mygetbits(int *vtmp, const int nnn, DState* s)
+static int getbits(int *vtmp, const int nnn, DState* s)
 {
    for (;;) {
       if (s->bsLive >= nnn) {
-         const unsigned int v = (s->bsBuff >>
-                           (s->bsLive - nnn)) & ((1 << nnn) - 1);
+         const unsigned int v = (s->bsBuff >> (s->bsLive - nnn)) & ((1 << nnn) - 1);
          s->bsLive -= nnn;
          *vtmp = v; // NOLINT(*-narrowing-conversions)
         return 0;
@@ -325,16 +311,6 @@ static int __mygetbits(int *vtmp, const int nnn, DState* s)
       s->avail_in--;
    }
 }
-
-#define GET_BITS(lll,vvv,nnn)                     \
-   case lll: s->state = lll; \
-    if (__mygetbits(&vvv,nnn,s)) RETURN(BZ_OK)
-
-#define GET_UCHAR(lll,uuu)                        \
-   GET_BITS(lll,uuu,8)
-
-#define GET_BIT(lll,uuu)                          \
-   GET_BITS(lll,uuu,1)
 
 static int getmtf1(DState_save *sv,DState* s)
 {
@@ -351,23 +327,6 @@ static int getmtf1(DState_save *sv,DState* s)
    sv->groupPos--;
    sv->zn = sv->gMinlen;
    return 0;
-}
-
-#define GET_MTF_VAL(label1,label2,lval)           \
-{                                                 \
-   if (getmtf1(&sv,s)) RETURN(BZ_DATA_ERROR);     \
-   GET_BITS(label1, zvec, zn);                    \
-   for (;;)  {                                    \
-      if (zn > 20) RETURN(BZ_DATA_ERROR);         \
-      if (zvec <= gLimit[zn]) break;              \
-      zn++;                                       \
-      GET_BIT(label2, zj);                        \
-      zvec = (zvec << 1) | zj;                    \
-   };                                             \
-   if (zvec - gBase[zn] < 0                       \
-       || zvec - gBase[zn] >= BZ_MAX_ALPHA_SIZE)  \
-      RETURN(BZ_DATA_ERROR);                      \
-   lval = gPerm[zvec - gBase[zn]];                \
 }
 
 int BZ2_decompress(DState *s) {
@@ -405,81 +364,172 @@ int BZ2_decompress(DState *s) {
    #define gPerm (sv.gPerm)
 
    retVal = BZ_OK;
+   printf("Fun Begins\n");
 
    switch (s->state) {
 
       case BZ_X_BLKHDR_1:
          s->state = BZ_X_BLKHDR_1;
-         if (__mygetbits(&uc, 8, s)) {
+         printf("BZ_X_BLKHDR_1\n");
+         if (getbits(&uc, 8, s)) {
             retVal = BZ_OK;
             goto save_state_and_return;
          }
+         printf("%02X\n", uc & 0xFF);
+         printf("%02X\n", s->avail_in);
 
-      if (uc == 0x17) {
-         s->state = BZ_X_IDLE;
-         retVal = BZ_STREAM_END;
-         goto save_state_and_return;
-      }
-      if (uc != 0x31) {
-         retVal = BZ_DATA_ERROR;
-         goto save_state_and_return;
-      }
+         if (uc == 0x17) {
+            s->state = BZ_X_IDLE;
+            printf("BZ_X_IDLE\n");
+            retVal = BZ_STREAM_END;
+            goto save_state_and_return;
+         }
+         if (uc != 0x31) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
 
-      s->origPtr = 0;
-      GET_UCHAR(BZ_X_ORIGPTR_1, uc);
-      s->origPtr = (s->origPtr << 8) | uc;
-      GET_UCHAR(BZ_X_ORIGPTR_2, uc);
-      s->origPtr = (s->origPtr << 8) | uc;
-      GET_UCHAR(BZ_X_ORIGPTR_3, uc);
-      s->origPtr = (s->origPtr << 8) | uc;
-
-      if (s->origPtr < 0)
-         RETURN(BZ_DATA_ERROR);
-      if (s->origPtr > 10 + NSIS_COMPRESS_BZIP2_LEVEL*100000)
-         RETURN(BZ_DATA_ERROR);
-
-      for (i = 0; i < 16; i++) {
-         GET_BIT(BZ_X_MAPPING_1, uc);
-         if (uc == 1)
-            s->inUse16[i] = True; else
-            s->inUse16[i] = False;
-      }
-
-      for (i = 0; i < 256; i++) s->inUse[i] = False;
-
-      for (i = 0; i < 16; i++)
-         if (s->inUse16[i])
-            for (j = 0; j < 16; j++) {
-               GET_BIT(BZ_X_MAPPING_2, uc);
-               if (uc == 1) s->inUse[i * 16 + j] = True;
+         s->origPtr = 0;
+         case BZ_X_ORIGPTR_1:
+            s->state = BZ_X_ORIGPTR_1;
+            printf("BZ_X_ORIGPTR_1\n");
+            if (getbits(&uc, 8, s)) {
+               retVal = BZ_OK;
+               goto save_state_and_return;
             }
-      {
+         printf("%02X\n", uc & 0xFF);
+         printf("%02X\n", s->avail_in);
+         s->origPtr = (s->origPtr << 8) | uc;
+         case BZ_X_ORIGPTR_2:
+            s->state = BZ_X_ORIGPTR_2;
+            printf("BZ_X_ORIGPTR_2\n");
+            if (getbits(&uc, 8, s)) {
+               retVal = BZ_OK;
+               goto save_state_and_return;
+            }
+         printf("%02X\n", uc & 0xFF);
+         printf("%02X\n", s->avail_in);
+         s->origPtr = (s->origPtr << 8) | uc;
+         case BZ_X_ORIGPTR_3:
+            s->state = BZ_X_ORIGPTR_3;
+            printf("BZ_X_ORIGPTR_3\n");
+            if (getbits(&uc, 8, s)) {
+               retVal = BZ_OK;
+               goto save_state_and_return;
+            }
+         printf("%02X\n", uc & 0xFF);
+         printf("%02X\n", s->avail_in);
+         s->origPtr = (s->origPtr << 8) | uc;
+
+         if (s->origPtr < 0) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
+         if (s->origPtr > 10 + NSIS_COMPRESS_BZIP2_LEVEL*100000) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
+
+         for (i = 0; i < 16; i++) {
+            case BZ_X_MAPPING_1:
+               s->state = BZ_X_MAPPING_1;
+               printf("BZ_X_MAPPING_1\n");
+               if (getbits(&uc, 1, s)) {
+                  retVal = BZ_OK;
+                  goto save_state_and_return;
+               }
+            printf("%02X\n", uc & 0xFF);
+            printf("%02X\n", s->avail_in);
+            if (uc == 1)
+               s->inUse16[i] = True; else
+               s->inUse16[i] = False;
+         }
+
+         for (i = 0; i < 256; i++) s->inUse[i] = False;
+
+         for (i = 0; i < 16; i++)
+            if (s->inUse16[i])
+               for (j = 0; j < 16; j++) {
+                  case BZ_X_MAPPING_2:
+                     s->state = BZ_X_MAPPING_2;
+                     printf("BZ_X_MAPPING_2\n");
+                     if (getbits(&uc, 1, s)) {
+                        retVal = BZ_OK;
+                        goto save_state_and_return;
+                     }
+                  printf("%02X\n", uc & 0xFF);
+                  printf("%02X\n", s->avail_in);
+                  if (uc == 1) s->inUse[i * 16 + j] = True;
+               }
          int qi;
          s->nInUse = 0;
          for (qi = 0; qi < 256; qi++)
             if (s->inUse[qi])
                s->seqToUnseq[s->nInUse++] = qi;
-      }
 
-      if (s->nInUse == 0) RETURN(BZ_DATA_ERROR);
-      alphaSize = s->nInUse+2;
-
-      GET_BITS(BZ_X_SELECTOR_1, nGroups, 3);
-      if (nGroups < 2 || nGroups > 6) RETURN(BZ_DATA_ERROR);
-      GET_BITS(BZ_X_SELECTOR_2, nSelectors, 15);
-      if (nSelectors < 1) RETURN(BZ_DATA_ERROR);
-      for (i = 0; i < nSelectors; i++) {
-         j = 0;
-         while (True) {
-            GET_BIT(BZ_X_SELECTOR_3, uc);
-            if (uc == 0) break;
-            j++;
-            if (j >= nGroups) RETURN(BZ_DATA_ERROR);
+         if (s->nInUse == 0) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
          }
-         s->selectorMtf[i] = j;
-      }
+         alphaSize = s->nInUse+2;
 
-      {
+         case BZ_X_SELECTOR_1:
+            s->state = BZ_X_SELECTOR_1;
+            printf("BZ_X_SELECTOR_1\n");
+            if (getbits(&nGroups, 3, s)) {
+               retVal = BZ_OK;
+               printf("BZ_OK\n");
+               goto save_state_and_return;
+            }
+         printf("%02X\n", nGroups & 0xFF);
+         printf("%02X\n", s->avail_in);
+         if (nGroups < 2 || nGroups > 6) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
+         case BZ_X_SELECTOR_2:
+            s->state = BZ_X_SELECTOR_2;
+            printf("BZ_X_SELECTOR_2\n");
+            if (getbits(&nSelectors, 15, s)) {
+               retVal = BZ_OK;
+               printf("BZ_OK\n");
+               goto save_state_and_return;
+            }
+         printf("%02X\n", nSelectors & 0xFF);
+         printf("%02X\n", s->avail_in);
+         if (nSelectors < 1) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
+         for (i = 0; i < nSelectors; i++) {
+            j = 0;
+            while (True) {
+               case BZ_X_SELECTOR_3:
+                  s->state = BZ_X_SELECTOR_3;
+                  printf("BZ_X_SELECTOR_3\n");
+                  if (getbits(&uc, 1, s)) {
+                     retVal = BZ_OK;
+                     printf("BZ_OK\n");
+                     goto save_state_and_return;
+                  }
+               printf("%02X\n", uc & 0xFF);
+               printf("%02X\n", s->avail_in);
+               if (uc == 0) break;
+               j++;
+               if (j >= nGroups) {
+                  retVal = BZ_DATA_ERROR;
+                  printf("BZ_DATA_ERROR\n");
+                  goto save_state_and_return;
+               }
+            }
+            s->selectorMtf[i] = j;
+         }
          unsigned char pos[BZ_N_GROUPS], tmp, v;
          for (v = 0; v < nGroups; v++) pos[v] = v; // NOLINT(*-too-small-loop-variable)
 
@@ -490,47 +540,76 @@ int BZ2_decompress(DState *s) {
             pos[0] = tmp;
             s->selector[i] = tmp;
          }
-      }
 
-      for (t = 0; t < nGroups; t++) {
-         GET_BITS(BZ_X_CODING_1, curr, 5);
-         for (i = 0; i < alphaSize; i++) {
-            while (True) {
-               if (curr < 1 || curr > 20) RETURN(BZ_DATA_ERROR);
-               GET_BIT(BZ_X_CODING_2, uc);
-               if (uc == 0) break;
-               GET_BIT(BZ_X_CODING_3, uc);
-               if (uc == 0) curr++; else curr--;
+         for (t = 0; t < nGroups; t++) {
+            case BZ_X_CODING_1:
+               s->state = BZ_X_CODING_1;
+               printf("BZ_X_CODING_1\n");
+               if (getbits(&curr, 5, s)) {
+                  retVal = BZ_OK;
+                  printf("BZ_OK\n");
+                  goto save_state_and_return;
+               }
+            printf("%02X\n", curr & 0xFF);
+            printf("%02X\n", s->avail_in);
+            for (i = 0; i < alphaSize; i++) {
+               while (True) {
+                  if (curr < 1 || curr > 20) {
+                     retVal = BZ_DATA_ERROR;
+                     printf("BZ_DATA_ERROR\n");
+                     goto save_state_and_return;
+                  }
+                  case BZ_X_CODING_2:
+                     s->state = BZ_X_CODING_2;
+                     printf("BZ_X_CODING_2\n");
+                     if (getbits(&uc, 1, s)) {
+                        retVal = BZ_OK;
+                        printf("BZ_OK\n");
+                        goto save_state_and_return;
+                     }
+                  printf("%02X\n", uc & 0xFF);
+                  printf("%02X\n", s->avail_in);
+                  if (uc == 0) break;
+                  case BZ_X_CODING_3:
+                     s->state = BZ_X_CODING_3;
+                     printf("BZ_X_CODING_3\n");
+                     if (getbits(&uc, 1, s)) {
+                        retVal = BZ_OK;
+                        printf("BZ_OK\n");
+                        goto save_state_and_return;
+                     }
+                  printf("%02X\n", uc & 0xFF);
+                  printf("%02X\n", s->avail_in);
+                  if (uc == 0) curr++; else curr--;
+               }
+               s->len[t][i] = curr;
             }
-            s->len[t][i] = curr;
          }
-      }
 
-      for (t = 0; t < nGroups; t++) {
-         minLen = 32;
-         maxLen = 0;
-         for (i = 0; i < alphaSize; i++) {
-            if (s->len[t][i] > maxLen) maxLen = s->len[t][i];
-            if (s->len[t][i] < minLen) minLen = s->len[t][i];
+         for (t = 0; t < nGroups; t++) {
+            minLen = 32;
+            maxLen = 0;
+            for (i = 0; i < alphaSize; i++) {
+               if (s->len[t][i] > maxLen) maxLen = s->len[t][i];
+               if (s->len[t][i] < minLen) minLen = s->len[t][i];
+            }
+            BZ2_hbCreateDecodeTables (
+               &(s->limit[t][0]),
+               &(s->base[t][0]),
+               &(s->perm[t][0]),
+               &(s->len[t][0]),
+               minLen, maxLen, alphaSize
+            );
+            s->minLens[t] = minLen;
          }
-         BZ2_hbCreateDecodeTables (
-            &(s->limit[t][0]),
-            &(s->base[t][0]),
-            &(s->perm[t][0]),
-            &(s->len[t][0]),
-            minLen, maxLen, alphaSize
-         );
-         s->minLens[t] = minLen;
-      }
 
-      EOB      = s->nInUse+1;
-      nblockMAX = NSIS_COMPRESS_BZIP2_LEVEL*100000;
-      groupNo  = -1;
-      groupPos = 0;
+         EOB      = s->nInUse+1;
+         nblockMAX = NSIS_COMPRESS_BZIP2_LEVEL*100000;
+         groupNo  = -1;
+         groupPos = 0;
 
-      for (i = 0; i <= 255; i++) s->unzftab[i] = 0;
+         for (i = 0; i <= 255; i++) s->unzftab[i] = 0;
 
-      {
          int ii, jj, kk = MTFA_SIZE - 1;
          for (ii = 256 / MTFL_SIZE - 1; ii >= 0; ii--) {
             for (jj = MTFL_SIZE-1; jj >= 0; jj--) {
@@ -539,115 +618,239 @@ int BZ2_decompress(DState *s) {
             }
             s->mtfbase[ii] = kk + 1;
          }
-      }
 
-      nblock = 0;
-      GET_MTF_VAL(BZ_X_MTF_1, BZ_X_MTF_2, nextSym);
-
-      while (True) {
-
-         if (nextSym == EOB) break;
-
-         if (nextSym == BZ_RUNA || nextSym == BZ_RUNB) {
-
-            es = -1;
-            N = 1;
-            while (nextSym == BZ_RUNA || nextSym == BZ_RUNB)
-            {
-               if (nextSym == BZ_RUNA) es += N;
-               N = N << 1;
-               if (nextSym == BZ_RUNB) es += N;
-               GET_MTF_VAL(BZ_X_MTF_3, BZ_X_MTF_4, nextSym);
+         nblock = 0;
+         if (getmtf1(&sv,s)) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
+         case BZ_X_MTF_1:
+            s->state = BZ_X_MTF_1;
+            // printf("BZ_X_MTF_1\n");
+            if (getbits(&zvec, zn, s)) {
+               retVal = BZ_OK;
+               printf("BZ_OK\n");
+               goto save_state_and_return;
             }
+         for (;;) {
+            if (zn > 20) {
+               retVal = BZ_DATA_ERROR;
+               printf("BZ_DATA_ERROR\n");
+               goto save_state_and_return;
+            }
+            if (zvec <= gLimit[zn]) break;
+            zn++;
+            case BZ_X_MTF_2:
+               s->state = BZ_X_MTF_2;
+               // printf("BZ_X_MTF_2\n");
+               if (getbits(&zj, 1, s)) {
+                  retVal = BZ_OK;
+                  printf("BZ_OK\n");
+                  goto save_state_and_return;
+               }
+            zvec = (zvec << 1) | zj;
+         };
+         if (zvec - gBase[zn] < 0 || zvec - gBase[zn] >= BZ_MAX_ALPHA_SIZE) {
+               retVal = BZ_DATA_ERROR;
+               printf("BZ_DATA_ERROR\n");
+               goto save_state_and_return;
+         }
+         nextSym = gPerm[zvec - gBase[zn]];
 
-            es++;
-            uc = s->seqToUnseq[ s->mtfa[s->mtfbase[0]] ];
-            s->unzftab[uc] += es;
+         while (True) {
 
-             while (es > 0) {
-                if (nblock >= nblockMAX) RETURN(BZ_DATA_ERROR);
-                s->tt[nblock] = (unsigned int)uc;
-                nblock++;
-                es--;
-             }
-         } else {
-            if (nblock >= nblockMAX) RETURN(BZ_DATA_ERROR);
-            {
-               int pp;
-               unsigned int nn;
-               nn = (unsigned int)(nextSym - 1);
+            if (nextSym == EOB) break;
 
-               if (nn < MTFL_SIZE) {
-                  pp = s->mtfbase[0];
-                  uc = s->mtfa[pp+nn];
-                  while (nn > 0) {
-                     s->mtfa[(pp+nn)] = s->mtfa[(pp+nn)-1]; nn--;
-                  };
-                  s->mtfa[pp] = uc;
-               } else {
-                  int off;
-                  int lno;
-                  lno = nn / MTFL_SIZE; // NOLINT(*-narrowing-conversions)
-                  off = nn % MTFL_SIZE; // NOLINT(*-narrowing-conversions)
-                  pp = s->mtfbase[lno] + off;
-                  uc = s->mtfa[pp];
-                  while (pp > s->mtfbase[lno]) {
-                     s->mtfa[pp] = s->mtfa[pp-1]; pp--;
-                  };
-                  s->mtfbase[lno]++;
-                  while (lno > 0) {
-                     s->mtfbase[lno]--;
-                     s->mtfa[s->mtfbase[lno]]
-                        = s->mtfa[s->mtfbase[lno-1] + MTFL_SIZE - 1];
-                     lno--;
+            if (nextSym == BZ_RUNA || nextSym == BZ_RUNB) {
+
+               es = -1;
+               N = 1;
+               while (nextSym == BZ_RUNA || nextSym == BZ_RUNB)
+               {
+                  if (nextSym == BZ_RUNA) es += N;
+                  N = N << 1;
+                  if (nextSym == BZ_RUNB) es += N;
+                  if (getmtf1(&sv,s)) {
+                     retVal = BZ_DATA_ERROR;
+                     printf("BZ_DATA_ERROR\n");
+                     goto save_state_and_return;
                   }
-                  s->mtfbase[0]--;
-                  s->mtfa[s->mtfbase[0]] = uc;
-                  if (s->mtfbase[0] == 0) {
-                     int kk;
-                     int jj;
-                     int ii;
-                     kk = MTFA_SIZE-1;
-                     for (ii = 256 / MTFL_SIZE-1; ii >= 0; ii--) {
-                        for (jj = MTFL_SIZE-1; jj >= 0; jj--) {
-                           s->mtfa[kk] = s->mtfa[s->mtfbase[ii] + jj];
-                           kk--;
+                  case BZ_X_MTF_3:
+                     s->state = BZ_X_MTF_3;
+                     if (getbits(&zvec, zn, s)) {
+                        retVal = BZ_OK;
+                        printf("BZ_OK\n");
+                        goto save_state_and_return;
+                     }
+                  for (;;) {
+                     if (zn > 20) {
+                        retVal = BZ_DATA_ERROR;
+                        printf("BZ_DATA_ERROR\n");
+                        goto save_state_and_return;
+                     }
+                     if (zvec <= gLimit[zn]) break;
+                     zn++;
+                     case BZ_X_MTF_4:
+                        s->state = BZ_X_MTF_4;
+                        if (getbits(&zj, 1, s)) {
+                           retVal = BZ_OK;
+                           printf("BZ_OK\n");
+                           goto save_state_and_return;
                         }
-                        s->mtfbase[ii] = kk + 1;
+                     zvec = (zvec << 1) | zj;
+                  };
+                  if (zvec - gBase[zn] < 0 || zvec - gBase[zn] >= BZ_MAX_ALPHA_SIZE) {
+                        retVal = BZ_DATA_ERROR;
+                        printf("BZ_DATA_ERROR\n");
+                        goto save_state_and_return;
+                  }
+                  nextSym = gPerm[zvec - gBase[zn]];
+               }
+
+               es++;
+               uc = s->seqToUnseq[ s->mtfa[s->mtfbase[0]] ];
+               s->unzftab[uc] += es;
+
+                while (es > 0) {
+                   if (nblock >= nblockMAX) {
+                      retVal = BZ_DATA_ERROR;
+                      printf("BZ_DATA_ERROR\n");
+                      goto save_state_and_return;
+                   }
+                   s->tt[nblock] = (unsigned int)uc;
+                   nblock++;
+                   es--;
+                }
+            } else {
+               if (nblock >= nblockMAX) {
+                  retVal = BZ_DATA_ERROR;
+                  printf("BZ_DATA_ERROR\n");
+                  goto save_state_and_return;
+               }
+               {
+                  int pp;
+                  unsigned int nn;
+                  nn = (unsigned int)(nextSym - 1);
+
+                  if (nn < MTFL_SIZE) {
+                     pp = s->mtfbase[0];
+                     uc = s->mtfa[pp+nn];
+                     while (nn > 0) {
+                        s->mtfa[(pp+nn)] = s->mtfa[(pp+nn)-1]; nn--;
+                     };
+                     s->mtfa[pp] = uc;
+                  } else {
+                     int off;
+                     int lno;
+                     lno = nn / MTFL_SIZE; // NOLINT(*-narrowing-conversions)
+                     off = nn % MTFL_SIZE; // NOLINT(*-narrowing-conversions)
+                     pp = s->mtfbase[lno] + off;
+                     uc = s->mtfa[pp];
+                     while (pp > s->mtfbase[lno]) {
+                        s->mtfa[pp] = s->mtfa[pp-1]; pp--;
+                     };
+                     s->mtfbase[lno]++;
+                     while (lno > 0) {
+                        s->mtfbase[lno]--;
+                        s->mtfa[s->mtfbase[lno]]
+                           = s->mtfa[s->mtfbase[lno-1] + MTFL_SIZE - 1];
+                        lno--;
+                     }
+                     s->mtfbase[0]--;
+                     s->mtfa[s->mtfbase[0]] = uc;
+                     if (s->mtfbase[0] == 0) {
+                        kk = MTFA_SIZE-1;
+                        for (ii = 256 / MTFL_SIZE-1; ii >= 0; ii--) {
+                           for (jj = MTFL_SIZE-1; jj >= 0; jj--) {
+                              s->mtfa[kk] = s->mtfa[s->mtfbase[ii] + jj];
+                              kk--;
+                           }
+                           s->mtfbase[ii] = kk + 1;
+                        }
                      }
                   }
                }
+
+               s->unzftab[s->seqToUnseq[uc]]++;
+               s->tt[nblock]   = (unsigned int)(s->seqToUnseq[uc]);
+               nblock++;
+
+               if (getmtf1(&sv,s)) {
+                  retVal = BZ_DATA_ERROR;
+                  printf("BZ_DATA_ERROR\n");
+                  goto save_state_and_return;
+               }
+               case BZ_X_MTF_5:
+                  s->state = BZ_X_MTF_5;
+                  // printf("BZ_X_MTF_5\n");
+                  if (getbits(&zvec, zn, s)) {
+                     retVal = BZ_OK;
+                     printf("BZ_OK\n");
+                     goto save_state_and_return;
+                  }
+               for (;;) {
+                  if (zn > 20) {
+                     retVal = BZ_DATA_ERROR;
+                     printf("BZ_DATA_ERROR\n");
+                     goto save_state_and_return;
+                  }
+                  if (zvec <= gLimit[zn]) break;
+                  zn++;
+                  case BZ_X_MTF_6:
+                     s->state = BZ_X_MTF_6;
+                     // printf("BZ_X_MTF_6\n");
+                     if (getbits(&zj, 1, s)) {
+                        retVal = BZ_OK;
+                        printf("BZ_OK\n");
+                        goto save_state_and_return;
+                     }
+                  zvec = (zvec << 1) | zj;
+               };
+               if (zvec - gBase[zn] < 0 || zvec - gBase[zn] >= BZ_MAX_ALPHA_SIZE) {
+                     retVal = BZ_DATA_ERROR;
+                     printf("BZ_DATA_ERROR\n");
+                     goto save_state_and_return;
+               }
+               nextSym = gPerm[zvec - gBase[zn]];
             }
-
-            s->unzftab[s->seqToUnseq[uc]]++;
-            s->tt[nblock]   = (unsigned int)(s->seqToUnseq[uc]);
-            nblock++;
-
-            GET_MTF_VAL(BZ_X_MTF_5, BZ_X_MTF_6, nextSym);
          }
-      }
 
-      if (s->origPtr < 0 || s->origPtr >= nblock)
-         RETURN(BZ_DATA_ERROR);
+         if (s->origPtr < 0 || s->origPtr >= nblock) {
+            retVal = BZ_DATA_ERROR;
+            printf("BZ_DATA_ERROR\n");
+            goto save_state_and_return;
+         }
 
-      s->state_out_len = 0;
-      s->state_out_ch  = 0;
-      s->state = BZ_X_OUTPUT;
+         s->state_out_len = 0;
+         s->state_out_ch  = 0;
+         s->state = BZ_X_OUTPUT;
+         printf("BZ_X_OUTPUT\n");
+         printf("%02X\n", *s->next_in);
+         printf("%02X\n", s->avail_in);
 
-      s->cftab[0] = 0;
-      for (i = 1; i <= 256; i++) s->cftab[i] = s->unzftab[i-1]+s->cftab[i-1];
-      for (i = 0; i < nblock; i++) {
-         uc = (unsigned char)(s->tt[i] & 0xff);
-         s->tt[s->cftab[uc]] |= (i << 8);
-         s->cftab[uc]++;
-      }
+         s->cftab[0] = 0;
+         for (i = 1; i <= 256; i++) s->cftab[i] = s->unzftab[i-1]+s->cftab[i-1];
+         for (i = 0; i < nblock; i++) {
+            uc = (unsigned char)(s->tt[i] & 0xff);
+            s->tt[s->cftab[uc]] |= (i << 8);
+            s->cftab[uc]++;
+         }
 
-      s->tPos = s->tt[s->origPtr] >> 8;
-      s->nblock_used = 0;
-      BZ_GET_FAST(s->k0); s->nblock_used++;
+         s->tPos = s->tt[s->origPtr] >> 8;
+         s->nblock_used = 0;
+         s->tPos = s->tt[s->tPos];
+         s->k0 = (unsigned char)(s->tPos & 0xff);
+         s->tPos >>= 8;
+         s->nblock_used++;
 
-      RETURN(BZ_OK);
-   default: RETURN(BZ_DATA_ERROR);
+         retVal = BZ_OK;
+         printf("BZ_OK\n");
+         goto save_state_and_return;
+      
+   default:
+      retVal = BZ_DATA_ERROR;
+      printf("BZ_DATA_ERROR\n");
    }
 
    save_state_and_return:
@@ -684,7 +887,6 @@ int BZ2_decompress(DState *s) {
 
 static void unRLE_obuf_to_output_FAST ( DState* s )
 {
-   unsigned char k1;
    unsigned char         c_state_out_ch       = s->state_out_ch;
    int c_state_out_len = s->state_out_len;
    int c_nblock_used = s->nblock_used;
@@ -722,7 +924,10 @@ static void unRLE_obuf_to_output_FAST ( DState* s )
             c_state_out_len = 0; goto return_notr;
          };
          c_state_out_ch = c_k0;
-         BZ_GET_FAST_C(k1); c_nblock_used++;
+         c_tPos = c_tt[c_tPos];
+         unsigned char k1 = c_tPos & 0xff;
+         c_tPos >>= 8;
+         c_nblock_used++;
          if (k1 != c_k0) {
             c_k0 = k1; goto s_state_out_len_eq_one;
          };
@@ -730,18 +935,30 @@ static void unRLE_obuf_to_output_FAST ( DState* s )
             goto s_state_out_len_eq_one;
 
          c_state_out_len = 2;
-         BZ_GET_FAST_C(k1); c_nblock_used++;
+         c_tPos = c_tt[c_tPos];
+         k1 = (unsigned char)(c_tPos & 0xff);
+         c_tPos >>= 8;
+         c_nblock_used++;
          if (c_nblock_used == s_save_nblockPP) continue;
          if (k1 != c_k0) { c_k0 = k1; continue; };
 
          c_state_out_len = 3;
-         BZ_GET_FAST_C(k1); c_nblock_used++;
+         c_tPos = c_tt[c_tPos];
+         k1 = (unsigned char)(c_tPos & 0xff);
+         c_tPos >>= 8;
+         c_nblock_used++;
          if (c_nblock_used == s_save_nblockPP) continue;
          if (k1 != c_k0) { c_k0 = k1; continue; };
 
-         BZ_GET_FAST_C(k1); c_nblock_used++;
+         c_tPos = c_tt[c_tPos];
+         k1 = (unsigned char)(c_tPos & 0xff);
+         c_tPos >>= 8;
+         c_nblock_used++;
          c_state_out_len = ((int)k1) + 4;
-         BZ_GET_FAST_C(c_k0); c_nblock_used++;
+         c_tPos = c_tt[c_tPos];
+         c_k0 = (unsigned char)(c_tPos & 0xff);
+         c_tPos >>= 8;
+         c_nblock_used++;
       }
 
       return_notr:
