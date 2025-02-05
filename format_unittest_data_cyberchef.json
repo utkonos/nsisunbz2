@@ -1,0 +1,12 @@
+[
+  { "op": "Remove whitespace",
+    "args": [true, true, true, true, true, false] },
+  { "op": "Find / Replace",
+    "args": [{ "option": "Regex", "string": "^(?:len|limit|perm|base):" }, "[", true, false, false, false] },
+  { "op": "Find / Replace",
+    "args": [{ "option": "Regex", "string": "(?:len|limit|perm|base):" }, ",", true, false, true, false] },
+  { "op": "Find / Replace",
+    "args": [{ "option": "Regex", "string": "]$" }, "]]", true, false, true, false] },
+  { "op": "Find / Replace",
+    "args": [{ "option": "Regex", "string": "," }, ", ", true, false, true, false] }
+]
