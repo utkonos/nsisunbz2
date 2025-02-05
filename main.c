@@ -996,6 +996,7 @@ static void unRLE_obuf_to_output_FAST ( DState* s )
 
    const unsigned int *c_tt = s->tt;
    const int s_save_nblockPP = s->save.nblock + 1;
+   // printf("%d\n", s_save_nblockPP);
 
       while (True) {
          // printf("First\n");
