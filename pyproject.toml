@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nsisunbz2"
+version = "1.0.0"
+
+[project.scripts]
+nsisunbz2 = "nsisunbz2.cli:main"
