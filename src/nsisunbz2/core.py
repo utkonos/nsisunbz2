@@ -271,7 +271,7 @@ class Bz2Decompress:
             if not len(next_in):
                 raise RuntimeError(f'BZ_DATA_ERROR: {err} not found')
 
-            self.bsbuff = (self.bsbuff << 8) | int.from_bytes(next_in)
+            self.bsbuff = (self.bsbuff << 8) | int.from_bytes(next_in, byteorder='big')
             self.bslive += 8
 
     def _block_header(self):
