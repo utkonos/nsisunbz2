@@ -71,11 +71,8 @@
 """
 import io
 import logging
-import sys
 
 logger = logging.getLogger(__name__)
-
-sys.setrecursionlimit(1_000_000)
 
 # Constants from NSIS header files
 NSIS_COMPRESS_BZIP2_LEVEL = 9
