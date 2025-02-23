@@ -90,129 +90,6 @@ BZ_RUNA = 0
 BZ_RUNB = 1
 
 
-class UnRLE:
-    """Remove run length encoding from compressed data."""
-
-    def __init__(self, tt, nblock, nblock_used, k0, tpos):
-        self.out_ch = 0
-        self.out_len = 0
-
-        self.nblock_used = nblock_used
-        self.k0 = k0
-        self.tpos = tpos
-        self.tt = tt
-        self.nblockpp = nblock + 1
-
-        self.avail_out = 0x2FAF080
-        self.next_out = bytearray()
-
-        self.k1 = None
-
-    def _op1(self):
-        if self.avail_out == 0:
-            return True
-        if self.out_len == 1:
-            return False
-        self.next_out.append(self.out_ch)
-        self.out_len -= 1
-        self.avail_out -= 1
-
-    def _op2(self):
-        if self.avail_out == 0:
-            self.out_len = 1
-            return True
-        self.next_out.append(self.out_ch)
-        self.avail_out -= 1
-
-    def _op3(self):
-        if self.nblock_used == self.nblockpp:
-            self.out_len = 0
-            return True
-        self.out_ch = self.k0
-        self.tpos = self.tt[self.tpos]
-        self.k1 = self.tpos & 0xff
-        self.tpos >>= 8
-        self.nblock_used += 1
-
-    def _op4(self):
-        if self._op2():
-            return True
-        if self._op3():
-            return True
-        if self.k1 != self.k0:
-            self.k0 = self.k1
-            if self._op4():
-                return True
-            return False
-        if self.nblock_used == self.nblockpp:
-            if self._op4():
-                return True
-            return False
-
-        self._op5()
-
-    def _op5(self):
-        self.out_len = 2
-        self.tpos = self.tt[self.tpos]
-        self.k1 = self.tpos & 0xff
-        self.tpos >>= 8
-        self.nblock_used += 1
-        if self.nblock_used == self.nblockpp:
-            return
-        if self.k1 != self.k0:
-            self.k0 = self.k1
-            return
-
-        self.out_len = 3
-        self.tpos = self.tt[self.tpos]
-        self.k1 = self.tpos & 0xff
-        self.tpos >>= 8
-        self.nblock_used += 1
-        if self.nblock_used == self.nblockpp:
-            return
-        if self.k1 != self.k0:
-            self.k0 = self.k1
-            return
-
-        self.tpos = self.tt[self.tpos]
-        self.k1 = self.tpos & 0xff
-        self.tpos >>= 8
-        self.nblock_used += 1
-        self.out_len = self.k1 + 4
-        self.tpos = self.tt[self.tpos]
-        self.k0 = self.tpos & 0xff
-        self.tpos >>= 8
-        self.nblock_used += 1
-
-    def run(self):
-        """Remove run-length encoding and return fully decompressed data."""
-        while True:
-            if self.out_len > 0:
-                while True:
-                    match self._op1():
-                        case False:
-                            break
-                        case True:
-                            return self.next_out
-                if self._op2():
-                    return self.next_out
-            if self._op3():
-                return self.next_out
-            if self.k1 != self.k0:
-                self.k0 = self.k1
-                if self._op4():
-                    return self.next_out
-                continue
-            if self.nblock_used == self.nblockpp:
-                if self._op4():
-                    return self.next_out
-                continue
-
-            self._op5()
-
-        return self.next_out
-
-
 class Bz2Decompress:
     """Core decompression class containing all the steps for Bzip2."""
 
@@ -260,12 +137,6 @@ class Bz2Decompress:
         self.nblock = None
         self.unzftab = None
         self.tt = None
-
-        self.k0 = None
-        self.tpos = None
-        self.nblock_used = None
-
-        self.out = None
 
     def _get_bits(self, n, state):
         """Read n bits from the compressed data."""
@@ -695,23 +566,184 @@ class Bz2Decompress:
             self.tt[cftab[uc]] |= (i << 8)
             cftab[uc] += 1
 
-    def _tpos(self):
-        """Calculate the starting position for the inverse Burrows-Wheeler Transform from the origin pointer."""
-        nblock_used = 0
-        tpos = self.tt[self.origptr] >> 8
-        tpos = self.tt[tpos]
+    @staticmethod
+    def _unrle(tt, nblock, origptr):
+        """Remove run-length encoding and return fully decompressed data."""
+        out_ch = 0
+        out_len = 0
+        k1 = None
+        nblock_used = 1
+        output = bytearray()
+        nblockpp = nblock + 1
+        tpos = tt[origptr] >> 8
+        tpos = tt[tpos]
         k0 = tpos & 0xff
         tpos >>= 8
-        nblock_used += 1
 
-        self.k0 = k0
-        self.tpos = tpos
-        self.nblock_used = nblock_used
+        while True:
+            if out_len > 0:
+                while out_len > 1:
+                    output.append(out_ch)
+                    out_len -= 1
+                output.append(out_ch)
+            if nblock_used == nblockpp:
+                out_len = 0
+                return output
 
-    def _unrle(self):
-        """Reverse the run-length encoding."""
-        ur = UnRLE(self.tt, self.nblock, self.nblock_used, self.k0, self.tpos)
-        self.out = ur.run()
+            out_ch = k0
+            tpos = tt[tpos]
+            k1 = tpos & 0xff
+            tpos >>= 8
+            nblock_used += 1
+
+            if k1 != k0:
+                k0 = k1
+                while True:
+                    output.append(out_ch)
+                    if nblock_used == nblockpp:
+                        out_len = 0
+                        return output
+
+                    out_ch = k0
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    if k1 != k0:
+                        k0 = k1
+                        continue
+
+                    if nblock_used == nblockpp:
+                        continue
+
+                    out_len = 2
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    if nblock_used == nblockpp:
+                        break
+                    if k1 != k0:
+                        k0 = k1
+                        break
+
+                    out_len = 3
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    if nblock_used == nblockpp:
+                        break
+                    if k1 != k0:
+                        k0 = k1
+                        break
+
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    out_len = k1 + 4
+                    tpos = tt[tpos]
+                    k0 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+                    break
+                continue
+            if nblock_used == nblockpp:
+                while True:
+                    output.append(out_ch)
+                    if nblock_used == nblockpp:
+                        out_len = 0
+                        return output
+
+                    out_ch = k0
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    if k1 != k0:
+                        k0 = k1
+                        continue
+
+                    if nblock_used == nblockpp:
+                        continue
+
+                    out_len = 2
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    if nblock_used == nblockpp:
+                        break
+                    if k1 != k0:
+                        k0 = k1
+                        break
+
+                    out_len = 3
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    if nblock_used == nblockpp:
+                        break
+                    if k1 != k0:
+                        k0 = k1
+                        break
+
+                    tpos = tt[tpos]
+                    k1 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+
+                    out_len = k1 + 4
+                    tpos = tt[tpos]
+                    k0 = tpos & 0xff
+                    tpos >>= 8
+                    nblock_used += 1
+                    break
+                continue
+
+            out_len = 2
+            tpos = tt[tpos]
+            k1 = tpos & 0xff
+            tpos >>= 8
+            nblock_used += 1
+
+            if nblock_used == nblockpp:
+                continue
+            if k1 != k0:
+                k0 = k1
+                continue
+
+            out_len = 3
+            tpos = tt[tpos]
+            k1 = tpos & 0xff
+            tpos >>= 8
+            nblock_used += 1
+
+            if nblock_used == nblockpp:
+                continue
+            if k1 != k0:
+                k0 = k1
+                continue
+
+            tpos = tt[tpos]
+            k1 = tpos & 0xff
+            tpos >>= 8
+            nblock_used += 1
+
+            out_len = k1 + 4
+            tpos = tt[tpos]
+            k0 = tpos & 0xff
+            tpos >>= 8
+            nblock_used += 1
 
     def _run_block(self, stop=None):
         """Decompress one compressed block of data and write off the decompressed data."""
@@ -744,11 +776,7 @@ class Bz2Decompress:
         self._cftable()
         if stop == 'cftable':
             return
-        self._tpos()
-        if stop == 'tpos':
-            return
-        self._unrle()
-        self.o.write(self.out)
+        self.o.write(self._unrle(self.tt, self.nblock, self.origptr))
         self._reset()
 
     def decompress(self, script_size=None):

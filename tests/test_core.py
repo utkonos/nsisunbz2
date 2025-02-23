@@ -144,14 +144,6 @@ class TestBz2Decompress(unittest.TestCase):
         tt = [z for z in self.bzd.tt if z]
         self.assertListEqual(tt, expected)
 
-    def test_tpos(self):
-        """Test that the starting position for the inverse Burrows-Wheeler Transform is calculated properly."""
-        self.bzd._run_block('tpos')
-
-        self.assertEqual(self.bzd.k0, 128)
-        self.assertEqual(self.bzd.tpos, 268)
-        self.assertEqual(self.bzd.nblock_used, 1)
-
     def test_end_header(self):
         """Test that the correct end header is present after decompression is complete."""
         self.bzd._run_block()
