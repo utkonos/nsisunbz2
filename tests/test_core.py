@@ -171,8 +171,10 @@ class TestBz2DecompressSolid(unittest.TestCase):
 
     def setUp(self):
         self.d = importlib.resources.files('tests.data')
-        data = self.d.joinpath('compressed.bin').read_bytes()
-        self.bzd = nsisunbz2.core.Bz2Decompress(data)
+        full_data = bytes()
+        for i in range(1, 5):
+            full_data += self.d.joinpath(f'compressed.bin.part{i}').read_bytes()
+        self.bzd = nsisunbz2.core.Bz2Decompress(full_data)
 
     def test_decompress(self):
         """Test that the full run of the decompression class completes correctly."""
