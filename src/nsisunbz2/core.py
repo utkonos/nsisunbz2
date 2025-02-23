@@ -93,7 +93,7 @@ BZ_RUNB = 1
 class UnRLE:
     """Remove run length encoding from compressed data."""
 
-    def __init__(self, avail_out, tt, nblock, nblock_used, k0, tpos):
+    def __init__(self, tt, nblock, nblock_used, k0, tpos):
         self.out_ch = 0
         self.out_len = 0
 
@@ -103,7 +103,7 @@ class UnRLE:
         self.tt = tt
         self.nblockpp = nblock + 1
 
-        self.avail_out = avail_out
+        self.avail_out = 0x2FAF080
         self.next_out = bytearray()
 
         self.k1 = None
@@ -216,7 +216,7 @@ class UnRLE:
 class Bz2Decompress:
     """Core decompression class containing all the steps for Bzip2."""
 
-    def __init__(self, data, avail_out=None):
+    def __init__(self, data):
         if not isinstance(data, bytes):
             raise TypeError('Input must be bytes')
         self.f = io.BytesIO(data)
@@ -225,14 +225,9 @@ class Bz2Decompress:
         self.bslive = 0
         self.bsbuff = 0
 
-        if avail_out is not None:
-            self._reset(avail_out)
-        else:
-            self._reset()
+        self._reset()
 
-    def _reset(self, avail_out=0x2FAF080):
-        self.avail_out = avail_out
-
+    def _reset(self):
         self.origptr = None
 
         self.ninuse = None
@@ -715,7 +710,7 @@ class Bz2Decompress:
 
     def _unrle(self):
         """Reverse the run-length encoding."""
-        ur = UnRLE(self.avail_out, self.tt, self.nblock, self.nblock_used, self.k0, self.tpos)
+        ur = UnRLE(self.tt, self.nblock, self.nblock_used, self.k0, self.tpos)
         self.out = ur.run()
 
     def _run_block(self, stop=None):
