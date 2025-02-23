@@ -70,6 +70,12 @@
 --*/
 """
 import io
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
+
+sys.setrecursionlimit(1_000_000)
 
 # Constants from NSIS header files
 NSIS_COMPRESS_BZIP2_LEVEL = 9
@@ -210,14 +216,22 @@ class UnRLE:
 class Bz2Decompress:
     """Core decompression class containing all the steps for Bzip2."""
 
-    def __init__(self, data, avail_out):
+    def __init__(self, data, avail_out=None):
         if not isinstance(data, bytes):
             raise TypeError('Input must be bytes')
         self.f = io.BytesIO(data)
-        self.avail_out = avail_out
+        self.o = io.BytesIO()
 
         self.bslive = 0
         self.bsbuff = 0
+
+        if avail_out is not None:
+            self._reset(avail_out)
+        else:
+            self._reset()
+
+    def _reset(self, avail_out=0x2FAF080):
+        self.avail_out = avail_out
 
         self.origptr = None
 
@@ -258,7 +272,7 @@ class Bz2Decompress:
 
         self.out = None
 
-    def _get_bits(self, n, err=None):
+    def _get_bits(self, n, state):
         """Read n bits from the compressed data."""
         while True:
             if self.bslive >= n:
@@ -269,17 +283,26 @@ class Bz2Decompress:
 
             next_in = self.f.read(1)
             if not len(next_in):
-                raise RuntimeError(f'BZ_DATA_ERROR: {err} not found')
+                raise EOFError(f'BZ_DATA_ERROR: End of stream in state: {state}')
 
-            self.bsbuff = (self.bsbuff << 8) | int.from_bytes(next_in, byteorder='big')
+            self.bsbuff = ((self.bsbuff << 8) | int.from_bytes(next_in, byteorder='big')) & 0xffffffff
             self.bslive += 8
 
-    def _block_header(self):
-        """Check that the compressed stream starts with the correct abbreviated NSIS Bzip2 block header."""
-        uc = self._get_bits(8, 'BZ_X_BLKHDR_1')
+    def _header(self, first=False):
+        """Check the next header."""
+        if first:
+            state = 'BZ_X_BLKHDR_1'
+        else:
+            state = 'BZ_X_ENDHDR_1'
+        uc = self._get_bits(8, state)
 
-        if uc != 0x31:
-            raise RuntimeError('BZ_DATA_ERROR: Block header BZ_X_BLKHDR_1 not found')
+        if uc not in [0x31, 0x17]:
+            raise RuntimeError(f'BZ_DATA_ERROR: Block header {state} not found')
+
+        if uc == 0x31:
+            return True
+
+        return False
 
     def _origptr(self):
         """Construct the origin pointer."""
@@ -516,8 +539,8 @@ class Bz2Decompress:
         self.gbase = gbase
         self.nextsym = nextsym
 
-    def _decompress(self):
-        """Perform the remaining decompression phases."""
+    def _remaining_mtf(self):
+        """Perform the remaining move-to-front transform phases."""
         unzftab = [0] * 256
         tt = [0] * NSIS_COMPRESS_BZIP2_LEVEL * 100000
         eob = self.ninuse + 1
@@ -695,15 +718,10 @@ class Bz2Decompress:
         ur = UnRLE(self.avail_out, self.tt, self.nblock, self.nblock_used, self.k0, self.tpos)
         self.out = ur.run()
 
-    def _end_header(self):
-        """Check the end header."""
-        uc = self._get_bits(8, 'BZ_X_ENDHDR_1')
-        if uc != 0x17:
-            raise RuntimeError('BZ_DATA_ERROR: Incorrect BZ_X_ENDHDR_1')
-
-    def run(self, stop=None):
-        """Run the decompression process."""
-        self._block_header()
+    def _run_block(self, stop=None):
+        """Decompress one compressed block of data and write off the decompressed data."""
+        if not self._header():
+            return True
         self._origptr()
         if stop == 'origptr':
             return
@@ -725,8 +743,8 @@ class Bz2Decompress:
         self._first_mtf()
         if stop == 'first_mtf':
             return
-        self._decompress()
-        if stop == 'decompress':
+        self._remaining_mtf()
+        if stop == 'remaining_mtf':
             return
         self._cftable()
         if stop == 'cftable':
@@ -735,6 +753,22 @@ class Bz2Decompress:
         if stop == 'tpos':
             return
         self._unrle()
-        if stop in ['unrle', 'end_header']:
-            return
-        self._end_header()
+        self.o.write(self.out)
+        self._reset()
+
+    def decompress(self, script_size=None):
+        """Decompress blocks until hitting the end header."""
+        while True:
+            try:
+                if self._run_block():
+                    break
+            except EOFError as e:
+                logger.error(f'Data misalignment: {e}')
+                break
+            if script_size is not None:
+                if self.f.tell() > script_size:
+                    break
+
+        self.o.seek(0)
+
+        return self.o.read()

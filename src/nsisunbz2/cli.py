@@ -97,6 +97,5 @@ def main():
 
     bzd = nsisunbz2.core.Bz2Decompress(data, int(size, 0))
 
-    bzd.run()
     out_path = pathlib.Path(args.out)
-    out_path.write_bytes(bzd.out)
+    out_path.write_bytes(bzd.decompress())
