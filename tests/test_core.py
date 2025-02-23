@@ -13,7 +13,7 @@ class TestBz2Decompress(unittest.TestCase):
     def setUp(self):
         self.d = importlib.resources.files('tests.data')
         data = self.d.joinpath('setup1.bz2').read_bytes()
-        self.bzd = nsisunbz2.core.Bz2Decompress(data, 0x1728)
+        self.bzd = nsisunbz2.core.Bz2Decompress(data)
 
     def test_get_bits(self):
         """Test that the get bits function can pull bits from the compressed stream."""

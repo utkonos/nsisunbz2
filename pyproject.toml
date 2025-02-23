@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nsisunbz2"
-version = "1.0.3"
+version = "1.0.4"
 
 [project.scripts]
 nsisunbz2 = "nsisunbz2.cli:main"
