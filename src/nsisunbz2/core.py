@@ -527,17 +527,16 @@ class Bz2Decompress:
             self.tt[cftab[uc]] |= (i << 8)
             cftab[uc] += 1
 
-    @staticmethod
-    def _unrle(tt, nblock, origptr):
+    def _unrle(self):
         """Remove run-length encoding and return fully decompressed data."""
         out_ch = 0
         out_len = 0
         k1 = None
         nblock_used = 1
         output = bytearray()
-        nblockpp = nblock + 1
-        tpos = tt[origptr] >> 8
-        tpos = tt[tpos]
+        nblockpp = self.nblock + 1
+        tpos = self.tt[self.origptr] >> 8
+        tpos = self.tt[tpos]
         k0 = tpos & 0xff
         tpos >>= 8
 
@@ -552,7 +551,7 @@ class Bz2Decompress:
                 return output
 
             out_ch = k0
-            tpos = tt[tpos]
+            tpos = self.tt[tpos]
             k1 = tpos & 0xff
             tpos >>= 8
             nblock_used += 1
@@ -566,7 +565,7 @@ class Bz2Decompress:
                         return output
 
                     out_ch = k0
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -579,7 +578,7 @@ class Bz2Decompress:
                         continue
 
                     out_len = 2
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -591,7 +590,7 @@ class Bz2Decompress:
                         break
 
                     out_len = 3
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -602,13 +601,13 @@ class Bz2Decompress:
                         k0 = k1
                         break
 
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
 
                     out_len = k1 + 4
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k0 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -622,7 +621,7 @@ class Bz2Decompress:
                         return output
 
                     out_ch = k0
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -635,7 +634,7 @@ class Bz2Decompress:
                         continue
 
                     out_len = 2
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -647,7 +646,7 @@ class Bz2Decompress:
                         break
 
                     out_len = 3
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -658,13 +657,13 @@ class Bz2Decompress:
                         k0 = k1
                         break
 
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k1 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
 
                     out_len = k1 + 4
-                    tpos = tt[tpos]
+                    tpos = self.tt[tpos]
                     k0 = tpos & 0xff
                     tpos >>= 8
                     nblock_used += 1
@@ -672,7 +671,7 @@ class Bz2Decompress:
                 continue
 
             out_len = 2
-            tpos = tt[tpos]
+            tpos = self.tt[tpos]
             k1 = tpos & 0xff
             tpos >>= 8
             nblock_used += 1
@@ -684,7 +683,7 @@ class Bz2Decompress:
                 continue
 
             out_len = 3
-            tpos = tt[tpos]
+            tpos = self.tt[tpos]
             k1 = tpos & 0xff
             tpos >>= 8
             nblock_used += 1
@@ -695,13 +694,13 @@ class Bz2Decompress:
                 k0 = k1
                 continue
 
-            tpos = tt[tpos]
+            tpos = self.tt[tpos]
             k1 = tpos & 0xff
             tpos >>= 8
             nblock_used += 1
 
             out_len = k1 + 4
-            tpos = tt[tpos]
+            tpos = self.tt[tpos]
             k0 = tpos & 0xff
             tpos >>= 8
             nblock_used += 1
@@ -731,7 +730,7 @@ class Bz2Decompress:
         self._cftable()
         if stop == 'cftable':
             return
-        self.o.write(self._unrle(self.tt, self.nblock, self.origptr))
+        self.o.write(self._unrle())
         self._reset()
 
     def decompress(self, script_size=None):
