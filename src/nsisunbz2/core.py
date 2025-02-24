@@ -517,13 +517,6 @@ class Bz2Decompress:
 
     def _cftable(self):
         """Apply the cumulative frequency table."""
-        # These two origin pointer checks need to move to the function where
-        # the origin pointer is used. Also, the first check is redundant.
-        if self.origptr < 0:
-            raise RuntimeError('BZ_DATA_ERROR: Orig ptr is negative')
-        if self.origptr > 10 + NSIS_COMPRESS_BZIP2_LEVEL * 100000:
-            raise RuntimeError('BZ_DATA_ERROR: Orig ptr is too large')
-
         cftab = [0] * 257
 
         for i in range(1, 257):
