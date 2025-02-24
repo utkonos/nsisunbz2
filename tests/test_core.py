@@ -86,43 +86,9 @@ class TestBz2Decompress(unittest.TestCase):
         expected = [3, 3, 2, 7, 2, 0]
         self.assertListEqual(self.bzd.minlens, expected)
 
-    def test_mtf_init(self):
-        """Test that the move to front lists are initialized properly."""
-        self.bzd._run_block('mtf_init')
-
-        e = self.d.joinpath('mtf_base_mtfa.json').read_text()
-        expected = json.loads(e)
-        self.assertListEqual(self.bzd.mtfa, expected)
-
-        expected = [3840, 3856, 3872, 3888, 3904, 3920, 3936, 3952, 3968, 3984, 4000, 4016, 4032, 4048, 4064, 4080]
-        self.assertListEqual(self.bzd.mtfbase, expected)
-
-    def test_first_mtf(self):
-        """Test that the first move to front cycle completed properly."""
-        self.bzd._run_block('first_mtf')
-
-        self.assertEqual(self.bzd.grouppos, 49)
-        self.assertEqual(self.bzd.groupno, 0)
-        self.assertEqual(self.bzd.gsel, 0)
-        self.assertEqual(self.bzd.gminlen, 3)
-
-        e = self.d.joinpath('first_mtf_glimit.json').read_text()
-        expected = json.loads(e)
-        self.assertListEqual(self.bzd.glimit, expected)
-
-        e = self.d.joinpath('first_mtf_gperm.json').read_text()
-        expected = json.loads(e)
-        self.assertListEqual(self.bzd.gperm, expected)
-
-        e = self.d.joinpath('first_mtf_gbase.json').read_text()
-        expected = json.loads(e)
-        self.assertListEqual(self.bzd.gbase, expected)
-
-        self.assertEqual(self.bzd.nextsym, 157)
-
-    def test_remaining_mtf(self):
-        """Test that the remaing move-to-front function is working properly."""
-        self.bzd._run_block('remaining_mtf')
+    def test_mtf(self):
+        """Test that the move-to-front function is working properly."""
+        self.bzd._run_block('mtf')
 
         self.assertEqual(self.bzd.nblock, 3592)
 

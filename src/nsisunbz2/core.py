@@ -119,18 +119,6 @@ class Bz2Decompress:
         self.limit = None
         self.minlens = None
 
-        self.mtfa = None
-        self.mtfbase = None
-
-        self.grouppos = None
-        self.groupno = None
-        self.gsel = None
-        self.gminlen = None
-        self.glimit = None
-        self.gperm = None
-        self.gbase = None
-        self.nextsym = None
-
         self.nblock = None
         self.unzftab = None
         self.tt = None
@@ -338,8 +326,8 @@ class Bz2Decompress:
 
         self.minlens = minlens
 
-    def _mtf_init(self):
-        """Initialize the move to front lists."""
+    def _mtf(self):
+        """Perform the remaining move-to-front transform phases."""
         mtfa = [0] * MTFA_SIZE
         mtfbase = [0] * int(256 / MTFL_SIZE)
 
@@ -351,11 +339,11 @@ class Bz2Decompress:
                 k -= 1
             mtfbase[i] = k + 1
 
-        self.mtfa = mtfa
-        self.mtfbase = mtfbase
-
-    def _first_mtf(self):
-        """Perform first move to front cycle."""
+        unzftab = [0] * 256
+        tt = [0] * NSIS_COMPRESS_BZIP2_LEVEL * 100000
+        eob = self.ninuse + 1
+        nblock = 0
+        nblockmax = NSIS_COMPRESS_BZIP2_LEVEL * 100_000
         grouppos = 0
         groupno = -1
         gsel = 0
@@ -393,68 +381,51 @@ class Bz2Decompress:
 
         nextsym = gperm[zvec - gbase[zn]]
 
-        self.grouppos = grouppos
-        self.groupno = groupno
-        self.gsel = gsel
-        self.gminlen = gminlen
-        self.glimit = glimit
-        self.gperm = gperm
-        self.gbase = gbase
-        self.nextsym = nextsym
-
-    def _remaining_mtf(self):
-        """Perform the remaining move-to-front transform phases."""
-        unzftab = [0] * 256
-        tt = [0] * NSIS_COMPRESS_BZIP2_LEVEL * 100000
-        eob = self.ninuse + 1
-        nblock = 0
-        nblockmax = NSIS_COMPRESS_BZIP2_LEVEL * 100_000
-
         while True:
-            if self.nextsym == eob:
+            if nextsym == eob:
                 break
 
-            if self.nextsym == BZ_RUNA or self.nextsym == BZ_RUNB:
+            if nextsym == BZ_RUNA or nextsym == BZ_RUNB:
                 es = -1
                 n = 1
 
-                while self.nextsym == BZ_RUNA or self.nextsym == BZ_RUNB:
-                    if self.nextsym == BZ_RUNA:
+                while nextsym == BZ_RUNA or nextsym == BZ_RUNB:
+                    if nextsym == BZ_RUNA:
                         es += n
                     n = n << 1
-                    if self.nextsym == BZ_RUNB:
+                    if nextsym == BZ_RUNB:
                         es += n
 
-                    if self.grouppos == 0:
-                        self.groupno += 1
-                        if self.groupno >= self.nselectors:
+                    if grouppos == 0:
+                        groupno += 1
+                        if groupno >= self.nselectors:
                             raise RuntimeError('BZ_DATA_ERROR: Number of groups larger than number of selectors')
-                        self.grouppos = BZ_G_SIZE
-                        self.gsel = self.selector[self.groupno]
-                        self.gminlen = self.minlens[self.gsel]
-                        self.glimit = self.limit[self.gsel]
-                        self.gperm = self.perm[self.gsel]
-                        self.gbase = self.base[self.gsel]
-                    self.grouppos -= 1
-                    zn = self.gminlen
+                        grouppos = BZ_G_SIZE
+                        gsel = self.selector[groupno]
+                        gminlen = self.minlens[gsel]
+                        glimit = self.limit[gsel]
+                        gperm = self.perm[gsel]
+                        gbase = self.base[gsel]
+                    grouppos -= 1
+                    zn = gminlen
 
                     zvec = self._get_bits(zn, 'BZ_X_MTF_3')
 
                     while True:
                         if zn > 20:
                             raise RuntimeError('BZ_DATA_ERROR: Value zv too large')
-                        if zvec <= self.glimit[zn]:
+                        if zvec <= glimit[zn]:
                             break
                         zn += 1
                         zj = self._get_bits(1, 'BZ_X_MTF_4')
                         zvec = (zvec << 1) | zj
 
-                    if zvec - self.gbase[zn] < 0 or zvec - self.gbase[zn] >= BZ_MAX_ALPHA_SIZE:
+                    if zvec - gbase[zn] < 0 or zvec - gbase[zn] >= BZ_MAX_ALPHA_SIZE:
                         raise RuntimeError('BZ_DATA_ERROR: Value zvec outside of acceptable range')
-                    self.nextsym = self.gperm[zvec - self.gbase[zn]]
+                    nextsym = gperm[zvec - gbase[zn]]
 
                 es += 1
-                uc = self.seqtounseq[self.mtfa[self.mtfbase[0]]]
+                uc = self.seqtounseq[mtfa[mtfbase[0]]]
                 unzftab[uc] += es
 
                 while es > 0:
@@ -469,76 +440,76 @@ class Bz2Decompress:
                     raise RuntimeError('BZ_DATA_ERROR: Value nblock higher than maximum')
 
                 pp = 0
-                nn = self.nextsym - 1
+                nn = nextsym - 1
 
                 if nn < MTFL_SIZE:
-                    pp = self.mtfbase[0]
-                    uc = self.mtfa[pp + nn]
+                    pp = mtfbase[0]
+                    uc = mtfa[pp + nn]
                     while nn > 0:
-                        self.mtfa[pp + nn] = self.mtfa[pp + nn - 1]
+                        mtfa[pp + nn] = mtfa[pp + nn - 1]
                         nn -= 1
-                    self.mtfa[pp] = uc
+                    mtfa[pp] = uc
                 else:
                     lno = int(nn / MTFL_SIZE)
                     off = nn % MTFL_SIZE
-                    pp = self.mtfbase[lno] + off
-                    uc = self.mtfa[pp]
+                    pp = mtfbase[lno] + off
+                    uc = mtfa[pp]
 
-                    while pp > self.mtfbase[lno]:
-                        self.mtfa[pp] = self.mtfa[pp - 1]
+                    while pp > mtfbase[lno]:
+                        mtfa[pp] = mtfa[pp - 1]
                         pp -= 1
 
-                    self.mtfbase[lno] += 1
+                    mtfbase[lno] += 1
 
                     while lno > 0:
-                        self.mtfbase[lno] -= 1
-                        self.mtfa[self.mtfbase[lno]] = self.mtfa[self.mtfbase[lno - 1] + MTFL_SIZE - 1]
+                        mtfbase[lno] -= 1
+                        mtfa[mtfbase[lno]] = mtfa[mtfbase[lno - 1] + MTFL_SIZE - 1]
                         lno -= 1
 
-                    self.mtfbase[0] -= 1
+                    mtfbase[0] -= 1
 
-                    self.mtfa[self.mtfbase[0]] = uc
+                    mtfa[mtfbase[0]] = uc
 
-                    if self.mtfbase[0] == 0:
+                    if mtfbase[0] == 0:
                         k = MTFA_SIZE - 1
                         for i in reversed(range(int(256 / MTFL_SIZE))):
                             for j in reversed(range(MTFL_SIZE)):
-                                self.mtfa[k] = self.mtfa[self.mtfbase[i] + j]
+                                mtfa[k] = mtfa[mtfbase[i] + j]
                                 k -= 1
-                            self.mtfbase[i] = k + 1
+                            mtfbase[i] = k + 1
 
                 unzftab[self.seqtounseq[uc]] += 1
                 tt[nblock] = self.seqtounseq[uc]
                 nblock += 1
 
-                if self.grouppos == 0:
-                    self.groupno += 1
-                    if self.groupno >= self.nselectors:
+                if grouppos == 0:
+                    groupno += 1
+                    if groupno >= self.nselectors:
                         raise RuntimeError('BZ_DATA_ERROR: Number of groups too large')
-                    self.grouppos = BZ_G_SIZE
-                    self.gsel = self.selector[self.groupno]
-                    self.gminlen = self.minlens[self.gsel]
-                    self.glimit = self.limit[self.gsel]
-                    self.gperm = self.perm[self.gsel]
-                    self.gbase = self.base[self.gsel]
-                self.grouppos -= 1
-                zn = self.gminlen
+                    grouppos = BZ_G_SIZE
+                    gsel = self.selector[groupno]
+                    gminlen = self.minlens[gsel]
+                    glimit = self.limit[gsel]
+                    gperm = self.perm[gsel]
+                    gbase = self.base[gsel]
+                grouppos -= 1
+                zn = gminlen
 
                 zvec = self._get_bits(zn, 'BZ_X_MTF_5')
 
                 while True:
                     if zn > 20:
                         raise RuntimeError('BZ_DATA_ERROR: Value zv too large')
-                    if zvec <= self.glimit[zn]:
+                    if zvec <= glimit[zn]:
                         break
                     zn += 1
                     zj = self._get_bits(1, 'BZ_X_MTF_6')
                     zvec = (zvec << 1) | zj
 
-                if zvec - self.gbase[zn] < 0 or zvec - self.gbase[zn] >= BZ_MAX_ALPHA_SIZE:
+                if zvec - gbase[zn] < 0 or zvec - gbase[zn] >= BZ_MAX_ALPHA_SIZE:
                     raise RuntimeError('BZ_DATA_ERROR: Value zvec outside of acceptable range')
 
-                self.nextsym = self.gperm[zvec - self.gbase[zn]]
+                nextsym = gperm[zvec - gbase[zn]]
 
         self.nblock = nblock
         self.unzftab = unzftab
@@ -761,14 +732,8 @@ class Bz2Decompress:
         self._huffman_tables()
         if stop == 'huffman_tables':
             return
-        self._mtf_init()
-        if stop == 'mtf_init':
-            return
-        self._first_mtf()
-        if stop == 'first_mtf':
-            return
-        self._remaining_mtf()
-        if stop == 'remaining_mtf':
+        self._mtf()
+        if stop == 'mtf':
             return
         self._cftable()
         if stop == 'cftable':
