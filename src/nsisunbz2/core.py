@@ -211,7 +211,7 @@ class Bz2Decompress:
             raise RuntimeError('BZ_DATA_ERROR: Invalid number of groups')
 
         nselectors = self._get_bits(15, 'BZ_X_SELECTOR_2')
-        if nselectors < 1:  # Maybe this can be nselectors == 0 ?
+        if nselectors == 0:
             raise RuntimeError('BZ_DATA_ERROR: Invalid number of selectors')
 
         selectormtf = [0] * BZ_MAX_SELECTORS
@@ -219,8 +219,8 @@ class Bz2Decompress:
             j = 0
             while True:
                 uc = self._get_bits(1, 'BZ_X_SELECTOR_3')
-                if uc == 0:  # Why not store this value as 3 bits rather than a set of bits?
-                    break    # It can only be the number of groups which is already stored as 3 bits above.
+                if uc == 0:
+                    break
                 j += 1
                 if j >= ngroups:
                     raise RuntimeError('BZ_DATA_ERROR: Invalid selectorMtf value')
